@@ -1,0 +1,107 @@
+#####################################
+#####################################
+############## OUTFLANK #############
+#####################################
+#####################################
+
+#--------------------------------------------------------Data used:
+
+# 1 - RNAseq_mako_555loci_121samples.vcf
+# 2 - pop_mako_RNAseq.txt
+
+#--------------------------------------------------------install packages
+
+install.packages ("devtools")
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("qvalue")
+install.packages("patchwork")
+remotes::install_github("whitlock/OutFLANK")
+install_github("green-striped-gecko/dartR")
+install.packages("VennDiagram")
+install.packages("vcfR")
+install.packages("ggplot2")
+install.packages("adegenet")
+install.packages("hierfstat")
+install.packages("viridis")
+
+#-------------------------------------------------------load packages
+
+library (devtools)
+library(qvalue)
+library(vcfR)
+library(ggplot2)
+library(patchwork)
+library(adegenet)
+library(hierfstat)
+library(OutFLANK)
+library(dartR)
+library(VennDiagram)
+library(viridis)
+
+#--------------------------------------------------------read inputfile
+
+vcf <- read.vcfR("RNAseq_mako_555loci_121samples.vcf")
+pop_map <- read.table("pop_mako_RNAseq.txt", header=TRUE, stringsAsFactors = TRUE)
+genind <- vcfR2genind(vcf)
+genind@pop <- pop_map$STRATA
+hierfstat <- genind2hierfstat(genind)
+write.bayescan(hierfstat)
+
+
+#--------------------------------------------------------Run OutFLANK using dartR wrapper script
+
+outflank <- gl.outflank(genind,
+                       withOutliers = TRUE,
+                       NoCorr = TRUE,
+                       Hmin = 0.05,
+                       binwidth = 0.005,
+                       Zoom = FALSE,
+                       RightZoomFraction = 0.05,
+                       titletext = NULL)
+
+
+#--------------------------------------------------------Extract OutFLANK results
+
+outflank.df = outflank$outflank$results
+
+#--------------------------------------------------------Remove duplicated rows for each SNP locus
+
+rowsToRemove = seq(1, nrow(outflank.df), by = 2)
+outflank.df = outflank.df[-rowsToRemove, ]
+
+#--------------------------------------------------------Print number of outliers (TRUE)
+
+outflank.df$OutlierFlag %>% summary
+
+#--------------------------------------------------------Extract outlier IDs
+
+outlier_indexes = which(outflank.df$OutlierFlag == TRUE)
+outlierID = locNames(genind)[outlier_indexes]
+outlierID
+write.table(outlierID, "outlier_RNAseq_outflank.txt")
+
+#--------------------------------------------------------Convert Fsts <0 to zero
+
+outflank.df$FST[outflank.df$FST < 0] = 0 
+
+#--------------------------------------------------------Italic labels
+
+fstlab = expression(italic("F")[ST])
+hetlab = expression(italic("H")[e])
+
+#--------------------------------------------------------Plot He versus Fst
+tiff('mako_RNAseq_outflank.tiff', units="in", width=5, height=4, res=300, compression = 'lzw')
+p.out.fk <- ggplot(data = outflank.df)+
+  geom_point(aes(x = He, y = FST, colour = OutlierFlag))+
+  scale_colour_manual(values = c("black","red"),
+                      labels = c("Neutral SNP","Outlier SNP"))+
+  xlab(hetlab)+
+  ylab(fstlab)+
+  theme(legend.title = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 15,
+                                  face = "bold"))
+print(p.out.fk)
+dev.off()
+
